@@ -8,32 +8,57 @@ import json
 import os
 
 # =========================
-# Load Data
+# PATH FIX (VERY IMPORTANT)
 # =========================
-index = faiss.read_index("../outputs/faiss.index")
-paths = np.load("../outputs/image_paths.npy")
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 
-# Load metadata
-if os.path.exists("../outputs/metadata.json"):
-    with open("../outputs/metadata.json") as f:
-        metadata = json.load(f)
-else:
-    metadata = {}
+INDEX_PATH = os.path.join(BASE_DIR, "outputs/faiss.index")
+PATHS_FILE = os.path.join(BASE_DIR, "outputs/image_paths.npy")
+MODEL_PATH = os.path.join(BASE_DIR, "outputs/model/fine_tuned.pth")
+META_PATH = os.path.join(BASE_DIR, "outputs/metadata.json")
 
 # =========================
-# Model
+# Load FAISS + Data
 # =========================
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+@st.cache_resource
+def load_data():
+    index = faiss.read_index(INDEX_PATH)
+    paths = np.load(PATHS_FILE)
 
-model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.DEFAULT)
-model.classifier = torch.nn.Identity()
+    if os.path.exists(META_PATH):
+        with open(META_PATH) as f:
+            metadata = json.load(f)
+    else:
+        metadata = {}
 
-# Load fine-tuned
-model.load_state_dict(torch.load("../outputs/model/fine_tuned.pth", map_location=device))
+    return index, paths, metadata
 
-model = model.to(device)
-model.eval()
+index, paths, metadata = load_data()
 
+# =========================
+# Load Model
+# =========================
+@st.cache_resource
+def load_model():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.DEFAULT)
+    model.classifier = torch.nn.Identity()
+
+    state_dict = torch.load(MODEL_PATH, map_location=device)
+    state_dict = {k: v for k, v in state_dict.items() if not k.startswith("classifier")}
+    model.load_state_dict(state_dict, strict=False)
+
+    model = model.to(device)
+    model.eval()
+
+    return model, device
+
+model, device = load_model()
+
+# =========================
+# Transform
+# =========================
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
@@ -42,7 +67,9 @@ transform = transforms.Compose([
 # =========================
 # UI
 # =========================
-st.title("Egyptian Artifacts Recognition 🔥")
+st.set_page_config(layout="wide")
+
+st.title("🏺 Egyptian Artifacts Recognition")
 
 uploaded = st.file_uploader("Upload an artifact image", type=["jpg", "png", "jpeg"])
 
@@ -63,24 +90,22 @@ if uploaded:
 
     st.subheader("🔍 Top Matches")
 
+    cols = st.columns(5)
+
     for i, idx in enumerate(I[0]):
         path = paths[idx]
         filename = os.path.basename(path)
 
-        result_img = Image.open(path)
+        with cols[i]:
+            st.image(Image.open(path), use_container_width=True)
 
-        st.image(result_img, width=200)
+            if filename in metadata:
+                info = metadata[filename]
 
-        if filename in metadata:
-            info = metadata[filename]
-
-            st.markdown(f"""
-            **Name:** {info['name']}  
-            **Description:** {info['description']}  
-            **Location:** {info['location']}  
-            **Age:** {info['age']}  
-            """)
-        else:
-            st.info("No metadata available")
-
-        st.markdown("---")
+                st.markdown(f"""
+                **Name:** {info.get('name', 'N/A')}  
+                **Location:** {info.get('location', 'N/A')}  
+                **Age:** {info.get('age', 'N/A')}  
+                """)
+            else:
+                st.caption("No metadata")
