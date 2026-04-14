@@ -1,0 +1,8 @@
+torch
+torchvision
+numpy
+faiss-cpu
+matplotlib
+streamlit
+pillow
+wikipedia
