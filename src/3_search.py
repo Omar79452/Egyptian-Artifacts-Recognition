@@ -1,60 +1,54 @@
+import streamlit as st
 import numpy as np
 import torch
 from PIL import Image
 from torchvision import models, transforms
 import faiss
 import os
-import matplotlib.pyplot as plt
-import wikipedia
-import sys
 
 # =========================
-# CONFIG
+# PATHS
 # =========================
-INDEX_PATH = "../outputs/faiss.index"
-PATHS_FILE = "../outputs/image_paths.npy"
-MODEL_PATH = "../outputs/model/fine_tuned.pth"
-TOP_K = 5
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+
+INDEX_PATH = os.path.join(BASE_DIR, "outputs/faiss.index")
+PATHS_FILE = os.path.join(BASE_DIR, "outputs/image_paths.npy")
+MODEL_PATH = os.path.join(BASE_DIR, "outputs/model/fine_tuned.pth")
 
 # =========================
-# Wikipedia Setup
+# LOAD DATA (CACHED)
 # =========================
-wikipedia.set_lang("en")
+@st.cache_resource
+def load_data():
+    index = faiss.read_index(INDEX_PATH)
+    paths = np.load(PATHS_FILE)
+    return index, paths
 
-def get_info(name):
-    try:
-        name = name.replace("_", " ").replace("-", " ")
-        summary = wikipedia.summary(name, sentences=2)
-        page = wikipedia.page(name)
-        return page.title, summary, page.url
-    except:
-        return None, None, None
+index, paths = load_data()
 
 # =========================
-# START CLEAN
+# LOAD MODEL (CACHED)
 # =========================
-plt.close('all')
+@st.cache_resource
+def load_model():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.DEFAULT)
+    model.classifier = torch.nn.Identity()
+
+    state_dict = torch.load(MODEL_PATH, map_location=device)
+    state_dict = {k: v for k, v in state_dict.items() if not k.startswith("classifier")}
+    model.load_state_dict(state_dict, strict=False)
+
+    model = model.to(device)
+    model.eval()
+
+    return model, device
+
+model, device = load_model()
 
 # =========================
-# Device
-# =========================
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# =========================
-# Load Model
-# =========================
-model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.DEFAULT)
-model.classifier = torch.nn.Identity()
-
-state_dict = torch.load(MODEL_PATH, map_location=device)
-state_dict = {k: v for k, v in state_dict.items() if not k.startswith("classifier")}
-model.load_state_dict(state_dict, strict=False)
-
-model = model.to(device)
-model.eval()
-
-# =========================
-# Transform
+# TRANSFORM
 # =========================
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
@@ -62,84 +56,51 @@ transform = transforms.Compose([
 ])
 
 # =========================
-# Load FAISS
+# UI
 # =========================
-if not os.path.exists(INDEX_PATH):
-    print("❌ FAISS index not found. Run 4_build_index.py first.")
-    exit()
+st.set_page_config(layout="wide")
+st.title("🏺 Egyptian Artifacts Recognition")
 
-index = faiss.read_index(INDEX_PATH)
-paths = np.load(PATHS_FILE)
+uploaded = st.file_uploader("📸 Upload any artifact image", type=["jpg", "png", "jpeg"])
 
-# =========================
-# Load Query
-# =========================
-QUERY_PATH = sys.argv[1] if len(sys.argv) > 1 else None
+if uploaded:
+    st.success("✅ Image uploaded successfully")
 
-if QUERY_PATH is None or not os.path.exists(QUERY_PATH):
-    print("❌ Query image not found! Pass image path as argument.")
-    exit()
+    # 🔥 أهم سطر (no filename dependency)
+    img = Image.open(uploaded).convert("RGB")
 
-query_img = Image.open(QUERY_PATH).convert("RGB")
-img_tensor = transform(query_img).unsqueeze(0).to(device)
+    st.image(img, caption="Query Image", width=300)
 
-# =========================
-# Extract Feature
-# =========================
-with torch.no_grad():
-    query_feat = model(img_tensor).cpu().numpy().astype("float32")
+    # =========================
+    # FEATURE EXTRACTION
+    # =========================
+    img_tensor = transform(img).unsqueeze(0).to(device)
 
-faiss.normalize_L2(query_feat)
+    with torch.no_grad():
+        feat = model(img_tensor).cpu().numpy().astype("float32")
 
-# =========================
-# Search
-# =========================
-distances, indices = index.search(query_feat, TOP_K)
+    faiss.normalize_L2(feat)
 
-print("\n🔍 Top Matches:\n")
+    # =========================
+    # SEARCH
+    # =========================
+    D, I = index.search(feat, 5)
 
-results = []
-for idx in indices[0]:
-    print(paths[idx])
-    results.append(paths[idx])
+    st.subheader("🔍 Top Matches")
 
-# =========================
-# SHOW
-# =========================
-fig, axes = plt.subplots(1, TOP_K + 1, figsize=(25, 8))
+    cols = st.columns(5)
 
-axes[0].imshow(query_img)
-axes[0].set_title("Query")
-axes[0].axis("off")
+    for i, idx in enumerate(I[0]):
+        raw_path = paths[idx]
 
-for i, path in enumerate(results):
-    img = Image.open(path)
-    filename = os.path.basename(path).split(".")[0]
+        # 🔥 FIX PATH (important for deployment)
+        filename = os.path.basename(raw_path)
+        path = os.path.join(BASE_DIR, "data/cleaned", filename)
 
-    title, summary, url = get_info(filename)
+        with cols[i]:
+            if os.path.exists(path):
+                st.image(Image.open(path), use_container_width=True)
+            else:
+                st.error("Image not found")
 
-    axes[i + 1].imshow(img)
-    axes[i + 1].axis("off")
-
-    if title:
-        axes[i + 1].set_title(title[:25])
-    else:
-        axes[i + 1].set_title("Match")
-
-    if title:
-        print(f"\n📚 {title}")
-        print(summary)
-        print(url)
-
-plt.subplots_adjust(left=0.01, right=0.99, top=0.9, bottom=0.05, wspace=0.2)
-
-mng = plt.get_current_fig_manager()
-try:
-    mng.window.state('zoomed')
-except:
-    try:
-        mng.window.showMaximized()
-    except:
-        pass
-
-plt.show()
+            st.caption(filename)
