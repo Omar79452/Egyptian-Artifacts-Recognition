@@ -6,6 +6,7 @@ import faiss
 import os
 import matplotlib.pyplot as plt
 import wikipedia
+import sys
 
 # =========================
 # CONFIG
@@ -13,7 +14,6 @@ import wikipedia
 INDEX_PATH = "../outputs/faiss.index"
 PATHS_FILE = "../outputs/image_paths.npy"
 MODEL_PATH = "../outputs/model/fine_tuned.pth"
-QUERY_PATH = "../test/query.jpg"
 TOP_K = 5
 
 # =========================
@@ -26,7 +26,6 @@ def get_info(name):
         name = name.replace("_", " ").replace("-", " ")
         summary = wikipedia.summary(name, sentences=2)
         page = wikipedia.page(name)
-
         return page.title, summary, page.url
     except:
         return None, None, None
@@ -47,7 +46,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = models.efficientnet_b0(weights=models.EfficientNet_B0_Weights.DEFAULT)
 model.classifier = torch.nn.Identity()
 
-# 🔥 FIX classifier mismatch
 state_dict = torch.load(MODEL_PATH, map_location=device)
 state_dict = {k: v for k, v in state_dict.items() if not k.startswith("classifier")}
 model.load_state_dict(state_dict, strict=False)
@@ -76,8 +74,10 @@ paths = np.load(PATHS_FILE)
 # =========================
 # Load Query
 # =========================
-if not os.path.exists(QUERY_PATH):
-    print("❌ Query image not found!")
+QUERY_PATH = sys.argv[1] if len(sys.argv) > 1 else None
+
+if QUERY_PATH is None or not os.path.exists(QUERY_PATH):
+    print("❌ Query image not found! Pass image path as argument.")
     exit()
 
 query_img = Image.open(QUERY_PATH).convert("RGB")
@@ -104,16 +104,14 @@ for idx in indices[0]:
     results.append(paths[idx])
 
 # =========================
-# SHOW (FULLSCREEN - ONE WINDOW ONLY)
+# SHOW
 # =========================
 fig, axes = plt.subplots(1, TOP_K + 1, figsize=(25, 8))
 
-# Query image
 axes[0].imshow(query_img)
 axes[0].set_title("Query")
 axes[0].axis("off")
 
-# Results
 for i, path in enumerate(results):
     img = Image.open(path)
     filename = os.path.basename(path).split(".")[0]
@@ -128,19 +126,16 @@ for i, path in enumerate(results):
     else:
         axes[i + 1].set_title("Match")
 
-    # Print info in terminal
     if title:
         print(f"\n📚 {title}")
         print(summary)
         print(url)
 
-# ضبط المسافات
 plt.subplots_adjust(left=0.01, right=0.99, top=0.9, bottom=0.05, wspace=0.2)
 
-# Fullscreen
 mng = plt.get_current_fig_manager()
 try:
-    mng.window.state('zoomed')  # Windows
+    mng.window.state('zoomed')
 except:
     try:
         mng.window.showMaximized()
