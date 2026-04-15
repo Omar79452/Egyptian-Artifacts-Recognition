@@ -40,6 +40,9 @@ def load_data():
 
 index, paths, metadata = load_data()
 
+# DEBUG - مؤقت عشان نشوف المسار
+st.write("Sample path:", paths[0])
+
 # =========================
 # Load Model
 # =========================
