@@ -25,6 +25,11 @@ def load_data():
     index = faiss.read_index(INDEX_PATH)
     paths = np.load(PATHS_FILE)
 
+    paths = np.array([
+        os.path.join(BASE_DIR, "data", "cleaned", os.path.basename(p))
+        for p in paths
+    ])
+
     if os.path.exists(META_PATH):
         with open(META_PATH) as f:
             metadata = json.load(f)
