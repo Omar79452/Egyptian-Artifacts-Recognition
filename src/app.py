@@ -26,7 +26,7 @@ def load_data():
     paths = np.load(PATHS_FILE)
 
     paths = np.array([
-        os.path.join(BASE_DIR, "data", "cleaned", os.path.basename(p))
+        os.path.join(BASE_DIR, "data", "cleaned", p.replace("\\", "/").split("/")[-1])
         for p in paths
     ])
 
@@ -39,10 +39,6 @@ def load_data():
     return index, paths, metadata
 
 index, paths, metadata = load_data()
-
-st.write("BASE_DIR:", BASE_DIR)
-st.write("Sample path:", paths[0])
-st.write("File exists:", os.path.exists(paths[0]))
 
 # =========================
 # Load Model
