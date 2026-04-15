@@ -8,7 +8,7 @@ import json
 import os
 
 # =========================
-# PATH FIX (VERY IMPORTANT)
+# PATH FIX
 # =========================
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 
@@ -40,8 +40,9 @@ def load_data():
 
 index, paths, metadata = load_data()
 
-# DEBUG - مؤقت عشان نشوف المسار
+st.write("BASE_DIR:", BASE_DIR)
 st.write("Sample path:", paths[0])
+st.write("File exists:", os.path.exists(paths[0]))
 
 # =========================
 # Load Model
@@ -105,11 +106,13 @@ if uploaded:
         filename = os.path.basename(path)
 
         with cols[i]:
-            st.image(Image.open(path), use_container_width=True)
+            if os.path.exists(path):
+                st.image(Image.open(path), use_container_width=True)
+            else:
+                st.error(f"❌ Not found:\n{path}")
 
             if filename in metadata:
                 info = metadata[filename]
-
                 st.markdown(f"""
                 **Name:** {info.get('name', 'N/A')}  
                 **Location:** {info.get('location', 'N/A')}  
